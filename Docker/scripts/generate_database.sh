@@ -6,20 +6,22 @@ if [ "$DOCKER_ENV" != "true" ]; then
     export_env_vars
 fi
 
-# DATABASE_PROVIDER may not be set at Docker build time because Railway
-# environment variables are only injected at runtime. If the provider is
-# unset we skip Prisma client generation here — deploy_database.sh will
-# run db:generate again at container start when all env vars are present.
-if [ -z "$DATABASE_PROVIDER" ]; then
-    echo "DATABASE_PROVIDER is not set (likely a build-time environment). Skipping Prisma generate — will run at container start."
-    exit 0
+# Always run prisma generate so that TypeScript types are available at build
+# time. prisma generate only reads the schema file — it does NOT require a
+# live database connection. We default to the postgresql schema when
+# DATABASE_PROVIDER is not set (e.g. during a Docker build on Railway where
+# env vars are injected at runtime, not build time). deploy_database.sh will
+# re-run db:generate at container start with the correct provider anyway.
+SCHEMA_PROVIDER="${DATABASE_PROVIDER:-postgresql}"
+
+# psql_bouncer shares the postgresql schema
+if [ "$SCHEMA_PROVIDER" == "psql_bouncer" ]; then
+    SCHEMA_PROVIDER="postgresql"
 fi
 
-if [[ "$DATABASE_PROVIDER" == "postgresql" || "$DATABASE_PROVIDER" == "mysql" || "$DATABASE_PROVIDER" == "psql_bouncer" ]]; then
-    export DATABASE_URL
-    echo "Generating database for $DATABASE_PROVIDER"
-    echo "Database URL: $DATABASE_URL"
-    npm run db:generate
+if [[ "$SCHEMA_PROVIDER" == "postgresql" || "$SCHEMA_PROVIDER" == "mysql" ]]; then
+    echo "Running prisma generate with schema: ./prisma/${SCHEMA_PROVIDER}-schema.prisma"
+    npx prisma generate --schema "./prisma/${SCHEMA_PROVIDER}-schema.prisma"
     if [ $? -ne 0 ]; then
         echo "Prisma generate failed"
         exit 1
@@ -27,6 +29,6 @@ if [[ "$DATABASE_PROVIDER" == "postgresql" || "$DATABASE_PROVIDER" == "mysql" ||
         echo "Prisma generate succeeded"
     fi
 else
-    echo "Error: Database provider $DATABASE_PROVIDER invalid."
+    echo "Error: Cannot determine a valid schema for DATABASE_PROVIDER='${DATABASE_PROVIDER}'. Skipping prisma generate."
     exit 1
 fi
