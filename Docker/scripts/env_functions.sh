@@ -12,7 +12,9 @@ export_env_vars() {
             export "$key=$value"
         done < .env
     else
-        echo ".env file not found"
-        exit 1
+        # At Docker build time there is no .env file — env vars come from the
+        # runtime environment (e.g. Railway). Warn but do not exit so that
+        # callers can decide whether to proceed or skip gracefully.
+        echo ".env file not found — skipping env export"
     fi
 }
